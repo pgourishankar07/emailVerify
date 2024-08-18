@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const bcrypt = require("bcrypt");
+const crypto = require("crypto");
 const app = express();
 const passport = require("passport");
 const LocalStratergy = require("passport-local").Strategy;
@@ -10,9 +11,7 @@ const methodOverride = require("method-override");
 const mongoose = require("mongoose");
 const sendEmail = require("./utils/sendEmail");
 
-mongoose.connect(process.env.MONGO_URL, {
-  useNewUrlParser: true,
-});
+mongoose.connect(process.env.MONGO_URL, {});
 
 const db = mongoose.connection;
 db.on("error", (error) => console.error(error));
@@ -38,7 +37,7 @@ app.use(methodOverride("_method"));
 
 //AUTHENTICATION_________________
 const User = require("./models/User"); // Adjust path as needed
-
+const Token = require("./models/token");
 function initialize(passport) {
   const authenticateUser = async (email, password, done) => {
     try {
@@ -131,15 +130,46 @@ app.post("/register", checkNotAuth, async (req, res) => {
   }
 });
 
-app.post("/forgot-password", (req, res) => {
+app.post("/forgot-password", async (req, res) => {
   try {
-    let email = req.body.email;
-    // const url = `${process.env.BASE_URL}users/${user.id}/verify/${token.token}`;
-    sendEmail(email, "Forgot Password", "url");
+    const user = await User.findOne({ email: req.body.email });
+    if (!user) return res.status(401).send({ message: "Invalid Email" });
+
+    let token = await Token.findOne({ userId: user._id });
+    if (!token) {
+      token = await new Token({
+        userId: user._id,
+        token: crypto.randomBytes(32).toString("hex"),
+      }).save();
+      const url = `${process.env.BASE_URL}users/${user.id}/verify/${token.token}`;
+      await sendEmail(user.email, "Reset Password", url);
+    }
+
     console.log(req.body.email);
     res.redirect("/");
   } catch (error) {
     console.log(error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/users/:id/verify/:token/", async (req, res) => {
+  try {
+    // console.log(req.params.id);
+    const user = await User.findOne({ _id: req.params.id });
+    if (!user) return res.status(400).send({ message: "Invalid link" });
+
+    const token = await Token.findOne({
+      userId: user._id,
+      token: req.params.token,
+    });
+    if (!token) return res.status(400).send({ message: "Invalid link" });
+
+    await User.updateOne({ _id: user._id });
+    await token.deleteOne();
+
+    res.redirect("/");
+  } catch (error) {
     res.status(500).send({ message: "Internal Server Error" });
   }
 });
