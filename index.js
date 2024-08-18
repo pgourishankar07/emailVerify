@@ -153,9 +153,8 @@ app.post("/forgot-password", async (req, res) => {
   }
 });
 
-app.get("/users/:id/verify/:token/", async (req, res) => {
+app.get("/users/:id/verify/:token", async (req, res) => {
   try {
-    // console.log(req.params.id);
     const user = await User.findOne({ _id: req.params.id });
     if (!user) return res.status(400).send({ message: "Invalid link" });
 
@@ -165,10 +164,45 @@ app.get("/users/:id/verify/:token/", async (req, res) => {
     });
     if (!token) return res.status(400).send({ message: "Invalid link" });
 
-    await User.updateOne({ _id: user._id });
+    // Render a form for password reset
+    res.render("resetPasswordForm", {
+      id: req.params.id,
+      token: req.params.token,
+    });
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.post("/users/:id/verify/:token", async (req, res) => {
+  try {
+    const user = await User.findOne({ _id: req.params.id });
+    if (!user) return res.status(400).send({ message: "Invalid link" });
+
+    const token = await Token.findOne({
+      userId: user._id,
+      token: req.params.token,
+    });
+    if (!token) return res.status(400).send({ message: "Invalid link" });
+
+    const { newPassword } = req.body;
+
+    if (!newPassword)
+      return res.status(400).send({ message: "Password is required" });
+
+    // Hash the new password
+    const encryptedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update the user's password
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { password: encryptedPassword } }
+    );
+
+    // Delete the token
     await token.deleteOne();
 
-    res.redirect("/");
+    res.redirect("/login"); // Redirect user to login page after password reset
   } catch (error) {
     res.status(500).send({ message: "Internal Server Error" });
   }
